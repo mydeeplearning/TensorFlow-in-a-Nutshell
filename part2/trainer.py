@@ -59,7 +59,10 @@ class Network(object):
         b_fc4 = bias_variable([1])
         h_fc4 = tf.nn.relu(tf.matmul(h_fc3, W_fc4) + b_fc4)
 
-        h_merge = tf.add(out_wide, h_fc4)
+        self.keep_prob = tf.placeholder(tf.float32)
+        h_fc4_drop = tf.nn.dropout(h_fc4, self.keep_prob)
+
+        h_merge = tf.add(out_wide, h_fc4_drop)
         self.out_p = tf.nn.sigmoid(h_merge)
 
         # loss function
@@ -138,7 +141,7 @@ class Trainer(object):
 
         return wide_columns, deep_columns, holders_dict
 
-    def create_feed_dict(self, df_batch):
+    def create_feed_dict(self, df_batch, keep_prob=0.7):
 
         # continuous_cols = {k: tf.constant(df_batch[k].values) for k in self.columns_continous}
 
@@ -164,6 +167,7 @@ class Trainer(object):
             self.holders_dict['Pclass']: df_batch['Pclass'].values,
 
             self.net.y: np.reshape(df_batch['Survived'].values, [-1, 1]),
+            self.net.keep_prob: keep_prob
         }
 
         return feed_dict
@@ -177,17 +181,17 @@ class Trainer(object):
         # train_size = df_train.shape[0]
         for epoch in range(int(1e7)):
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=0.7)
             self.session.run(self.apply_gradient, feed_dict=train_feed)
 
             if epoch % 10001 == 0:
                 self.backup()
 
             if epoch % 100 == 0:
-                train_feed = self.create_feed_dict(df_train.sample(100))
+                train_feed = self.create_feed_dict(df_train.sample(100), keep_prob=1.0)
                 train_loss = self.session.run(self.net.loss, feed_dict=train_feed)
 
-                test_feed = self.create_feed_dict(df_test.sample(100))
+                test_feed = self.create_feed_dict(df_test.sample(100), keep_prob=1.0)
                 test_loss = self.session.run(self.net.loss, feed_dict=test_feed)
                 print 'epoch: %d, train_loss: %5f, test_loss: %5f' \
                     % (epoch + 1, train_loss, test_loss)
