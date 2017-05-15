@@ -9,6 +9,7 @@ import numpy as np
 import random
 import pandas as pd
 import os
+from sklearn.model_selection import train_test_split
 
 
 BATCH_SIZE = 32
@@ -169,10 +170,11 @@ class Trainer(object):
 
     def run(self):
 
-        df_train = pd.read_csv(tf.gfile.Open("./train.csv"), skipinitialspace=True)
-        df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
+        df_data = pd.read_csv(tf.gfile.Open("./train.csv"), skipinitialspace=True)
+        # df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
+        df_train, df_test = train_test_split(df_data, test_size=0.2)
 
-        train_size = df_train.shape[0]
+        # train_size = df_train.shape[0]
         for epoch in range(int(1e7)):
             df_batch = df_train.sample(BATCH_SIZE)
             train_feed = self.create_feed_dict(df_batch)
@@ -185,13 +187,13 @@ class Trainer(object):
                 train_feed = self.create_feed_dict(df_train.sample(100))
                 train_loss = self.session.run(self.net.loss, feed_dict=train_feed)
 
-                # test_feed = self.create_feed_dict(df_test.sample(100))
-                # test_loss = self.session.run(self.net.loss, feed_dict=test_feed)
+                test_feed = self.create_feed_dict(df_test.sample(100))
+                test_loss = self.session.run(self.net.loss, feed_dict=test_feed)
                 test_loss = 0.0
                 print 'epoch: %d, train_loss: %5f, test_loss: %5f' \
                     % (epoch + 1, train_loss, test_loss)
 
-            break
+            # break
         return
 
     def restore(self):
