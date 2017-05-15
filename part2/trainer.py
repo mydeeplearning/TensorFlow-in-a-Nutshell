@@ -189,7 +189,6 @@ class Trainer(object):
 
                 test_feed = self.create_feed_dict(df_test.sample(100))
                 test_loss = self.session.run(self.net.loss, feed_dict=test_feed)
-                test_loss = 0.0
                 print 'epoch: %d, train_loss: %5f, test_loss: %5f' \
                     % (epoch + 1, train_loss, test_loss)
 
