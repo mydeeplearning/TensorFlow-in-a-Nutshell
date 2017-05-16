@@ -257,13 +257,22 @@ class Trainer(object):
         df_test = pd.read_csv(tf.gfile.Open("./adult.test"), names=COLUMNS, skipinitialspace=True)
 
         df_train = df_train.dropna(how='any', axis=0)
-        df_test = df_train.dropna(how='any', axis=0)
+        df_test = df_test.dropna(how='any', axis=0)
 
         df_train = df_train.sample(frac=1.0)
         df_test = df_test.sample(frac=1.0)
 
         df_train[LABEL_COLUMN] = (df_train["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         df_test[LABEL_COLUMN] = (df_test["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
+
+        print '---------------------------------------------------'
+        print 'pos:', np.sum(df_train[LABEL_COLUMN] == 1)
+        print 'neg:', np.sum(df_train[LABEL_COLUMN] == 0)
+        print '---------------------------------------------------'
+        print 'pos:', np.sum(df_test[LABEL_COLUMN] == 1)
+        print 'neg:', np.sum(df_test[LABEL_COLUMN] == 0)
+        print '---------------------------------------------------'
+        # return
         # train_size = df_train.shape[0]
         # df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
         # df_train, df_test = train_test_split(df_data, test_size=0.2, random_state=0)
