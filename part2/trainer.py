@@ -30,19 +30,19 @@ def bias_variable(shape):
 class Network(object):
 
     def __init__(self, wide_columns, deep_columns, holders_dict):
-        linear_parent_scope = 'linear'
-        dnn_parent_scope = 'dnn'
-        with tf.variable_scope(linear_parent_scope) as linear_input_scope:
+        self.linear_parent_scope = 'linear'
+        self.dnn_parent_scope = 'dnn'
+        with tf.variable_scope(self.linear_parent_scope) as linear_input_scope:
             # linear
             out_wide, _, _ = tf.contrib.layers.weighted_sum_from_feature_columns(
                 columns_to_tensors=holders_dict,
                 feature_columns=wide_columns,
                 num_outputs=1,
-                weight_collections=[linear_parent_scope],
+                weight_collections=[self.linear_parent_scope],
                 scope=linear_input_scope
             )
 
-        with tf.variable_scope(dnn_parent_scope) as dnn_input_scope:
+        with tf.variable_scope(self.dnn_parent_scope) as dnn_input_scope:
             # dnn
             input_deep = tf.contrib.layers.input_from_feature_columns(
                 columns_to_tensors=holders_dict,
@@ -97,9 +97,18 @@ class Trainer(object):
 
         self.wide_columns, self.deep_columns, self.holders_dict = self.create_feature_columns()
         self.net = Network(self.wide_columns, self.deep_columns, self.holders_dict)
-        return
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=ALPHA)
-        self.apply_gradient = self.optimizer.minimize(self.net.loss)
+
+        linear_optimizer = tf.train.FtrlOptimizer(learning_rate=0.2)
+        linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
+        linear_grad_and_vars = linear_optimizer.compute_gradients(self.net.loss, linear_vars)
+        linear_apply_grad = linear_optimizer.apply_gradients(linear_grad_and_vars)
+
+        dnn_optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
+        dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
+        dnn_grad_and_vars = dnn_optimizer.compute_gradients(self.net.loss, dnn_vars)
+        dnn_apply_grad = dnn_optimizer.apply_gradients(dnn_grad_and_vars)
+
+        self.apply_gradient = tf.group(*[linear_apply_grad, dnn_apply_grad])
 
         self.session = tf.Session(config=tf.ConfigProto(log_device_placement=False, allow_soft_placement=True))
         self.session.run(tf.global_variables_initializer())
@@ -195,12 +204,15 @@ class Trainer(object):
         df_train, df_test = train_test_split(df_data, test_size=0.2)
 
         # train_size = df_train.shape[0]
-        for epoch in range(int(1e7)):
+        print '===============checkpint: %d =========' % (self.global_t)
+        while self.global_t < int(1e4):
+            self.global_t += 1
+            epoch = self.global_t
             df_batch = df_train.sample(BATCH_SIZE)
             train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
             self.session.run(self.apply_gradient, feed_dict=train_feed)
 
-            if epoch % 10001 == 0:
+            if epoch % 1000 == 0:
                 self.backup()
 
             if epoch % 100 == 0:
@@ -210,8 +222,10 @@ class Trainer(object):
                 test_feed = self.create_feed_dict(df_test.sample(100), keep_prob=1.0)
                 test_loss = self.session.run(self.net.loss, feed_dict=test_feed)
                 print 'epoch: %d, train_loss: %5f, test_loss: %5f' \
-                    % (epoch + 1, train_loss, test_loss)
-
+                    % (epoch, train_loss, test_loss)
+                # r = self.session.run(self.net.out_p, feed_dict=test_feed)
+                # r = np.reshape(r, [-1])
+                # print r
             # break
         return
 
@@ -238,7 +252,7 @@ class Trainer(object):
 
 def main():
     t = Trainer()
-    # t.run()
+    t.run()
 
     # df_train = pd.read_csv(tf.gfile.Open("./train.csv"), skipinitialspace=True)
     # df_batch = df_train.sample(BATCH_SIZE)
