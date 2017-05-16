@@ -14,7 +14,7 @@ import tempfile
 from six.moves import urllib
 
 
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 ALPHA = 0.05
 CHECKPOINT_DIR = './tmp'
 
@@ -135,14 +135,14 @@ class Trainer(object):
         self.net = Network(self.wide_columns, self.deep_columns, self.holders_dict)
 
         linear_optimizer = tf.train.FtrlOptimizer(learning_rate=0.2)
-        # linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
-        linear_vars = tf.trainable_variables()
+        linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
+        # linear_vars = tf.trainable_variables()
         linear_grad_and_vars = linear_optimizer.compute_gradients(self.net.loss, linear_vars)
         linear_apply_grad = linear_optimizer.apply_gradients(linear_grad_and_vars)
 
         dnn_optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
-        # dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
-        dnn_vars = tf.trainable_variables()
+        dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
+        # dnn_vars = tf.trainable_variables()
         dnn_grad_and_vars = dnn_optimizer.compute_gradients(self.net.loss, dnn_vars)
         dnn_apply_grad = dnn_optimizer.apply_gradients(dnn_grad_and_vars)
 
@@ -155,6 +155,7 @@ class Trainer(object):
         self.global_t = 0
         self.saver = tf.train.Saver()
         self.restore()
+
         return
 
     def create_feature_columns(self):
@@ -190,30 +191,29 @@ class Trainer(object):
 
         # Wide columns and deep columns.
         wide_columns = [
-            age_buckets
-            # gender, native_country, education, occupation, workclass,
-            # relationship, age_buckets,
-            # tf.contrib.layers.crossed_column([education, occupation],
-            #                                  hash_bucket_size=int(1e4)),
-            # tf.contrib.layers.crossed_column(
-            #     [age_buckets, education, occupation],
-            #     hash_bucket_size=int(1e6)),
-            # tf.contrib.layers.crossed_column([native_country, occupation],
-            #                                  hash_bucket_size=int(1e4))
+            gender, native_country, education, occupation, workclass,
+            relationship, age_buckets,
+            tf.contrib.layers.crossed_column([education, occupation],
+                                             hash_bucket_size=int(1e4)),
+            tf.contrib.layers.crossed_column(
+                [age_buckets, education, occupation],
+                hash_bucket_size=int(1e6)),
+            tf.contrib.layers.crossed_column([native_country, occupation],
+                                             hash_bucket_size=int(1e4))
         ]
         deep_columns = [
-            # tf.contrib.layers.embedding_column(workclass, dimension=8),
-            # tf.contrib.layers.embedding_column(education, dimension=8),
-            # tf.contrib.layers.embedding_column(gender, dimension=8),
-            # tf.contrib.layers.embedding_column(relationship, dimension=8),
-            # tf.contrib.layers.embedding_column(native_country,
-            #                                    dimension=8),
-            # tf.contrib.layers.embedding_column(occupation, dimension=8),
+            tf.contrib.layers.embedding_column(workclass, dimension=8),
+            tf.contrib.layers.embedding_column(education, dimension=8),
+            tf.contrib.layers.embedding_column(gender, dimension=8),
+            tf.contrib.layers.embedding_column(relationship, dimension=8),
+            tf.contrib.layers.embedding_column(native_country,
+                                               dimension=8),
+            tf.contrib.layers.embedding_column(occupation, dimension=8),
             age,
-            # education_num,
-            # capital_gain,
-            # capital_loss,
-            # hours_per_week,
+            education_num,
+            capital_gain,
+            capital_loss,
+            hours_per_week,
         ]
 
         feat_colums = wide_columns + deep_columns
@@ -222,63 +222,50 @@ class Trainer(object):
             if c.name not in self.columns:
                 continue
             holder_name = 'holder_' + c.name
-            holders_dict[c.name] = tf.placeholder(c.dtype, [None], name=holder_name)
+            holders_dict[c.name] = tf.placeholder(c.dtype, [None, 1], name=holder_name)
+            # print holder_name
             # holders_dict[c.name] = tf.placeholder(tf.float32, [None], name=holder_name)
-        # print '---------------------------------------------------'
-        # print '---------------------------------------------------'
-        # print '---------------------------------------------------'
-        # print holders_dict
+        print '---------------------------------------------------'
+        print holders_dict
+        print '---------------------------------------------------'
         return wide_columns, deep_columns, holders_dict
 
     def create_feed_dict(self, df_batch, keep_prob=0.7):
 
-        # continuous_cols = {k: tf.constant(df_batch[k].values) for k in self.columns_continous}
-
-        # categorical_cols = {k: tf.SparseTensor(
-        #     indices=[[i, 0] for i in range(df_batch[k].size)],
-        #     values=df_batch[k].values,
-        #     shape=[df_batch[k].size, 1])
-        #     for k in self.columns_categorical}
-
-        # feature = dict(continuous_cols)
-        # feature.update(categorical_cols)
-
-        print '---------------------------------------------------'
-        print '---------------------------------------------------'
-        print '---------------------------------------------------'
         feed_dict = {}
         for key in self.holders_dict:
-            print df_batch[key].values.astype(float)
-            # feed_dict[self.holders_dict[key]] = df_batch[key].values
+            if key not in self.columns:
+                continue
+            feed_dict[self.holders_dict[key]] = np.reshape(df_batch[key].values, [-1, 1])
 
         feed_dict.update({
             self.net.y: np.reshape(df_batch[LABEL_COLUMN].values, [-1, 1]),
             self.net.keep_prob: keep_prob
         })
-        print '---------------------------------------------------'
-        print '---------------------------------------------------'
-        print '---------------------------------------------------'
-        # print df_batch
 
         return feed_dict
 
     def run(self):
 
-        df_data = pd.read_csv(tf.gfile.Open("./adult.data"), names=COLUMNS, skipinitialspace=True)
-        df_data = df_data.dropna(how='any', axis=0)
+        df_train = pd.read_csv(tf.gfile.Open("./adult.data"), names=COLUMNS, skipinitialspace=True)
+        df_test = pd.read_csv(tf.gfile.Open("./adult.test"), names=COLUMNS, skipinitialspace=True)
 
-        df_data[LABEL_COLUMN] = (df_data["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
+        df_train = df_train.dropna(how='any', axis=0)
+        df_test = df_train.dropna(how='any', axis=0)
+
+        df_train[LABEL_COLUMN] = (df_train["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
+        df_test[LABEL_COLUMN] = (df_test["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         # train_size = df_train.shape[0]
         # df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
-        df_train, df_test = train_test_split(df_data, test_size=0.2, random_state=0)
+        # df_train, df_test = train_test_split(df_data, test_size=0.2, random_state=0)
 
         # train_size = df_train.shape[0]
         print '===============checkpint: %d =========' % (self.global_t)
-        while self.global_t < int(1e4):
+        while self.global_t < int(1e8):
             self.global_t += 1
             epoch = self.global_t
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=0.5)
             self.session.run(self.apply_gradient, feed_dict=train_feed)
 
             if epoch % 1000 == 0:
