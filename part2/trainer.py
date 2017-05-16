@@ -200,8 +200,9 @@ class Trainer(object):
     def run(self):
 
         df_data = pd.read_csv(tf.gfile.Open("./train.csv"), skipinitialspace=True)
+        # train_size = df_train.shape[0]
         # df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
-        df_train, df_test = train_test_split(df_data, test_size=0.2)
+        df_train, df_test = train_test_split(df_data, test_size=0.2, random_state=0)
 
         # train_size = df_train.shape[0]
         print '===============checkpint: %d =========' % (self.global_t)
@@ -216,18 +217,29 @@ class Trainer(object):
                 self.backup()
 
             if epoch % 100 == 0:
-                train_feed = self.create_feed_dict(df_train.sample(100), keep_prob=1.0)
-                train_loss = self.session.run(self.net.loss, feed_dict=train_feed)
+                df_train_batch = df_train.sample(100)
+                train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0)
+                train_loss, train_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=train_feed)
+                train_accuracy = self.check_accuray(df_train_batch['Survived'].values, train_pred)
 
-                test_feed = self.create_feed_dict(df_test.sample(100), keep_prob=1.0)
-                test_loss = self.session.run(self.net.loss, feed_dict=test_feed)
-                print 'epoch: %d, train_loss: %5f, test_loss: %5f' \
-                    % (epoch, train_loss, test_loss)
-                # r = self.session.run(self.net.out_p, feed_dict=test_feed)
-                # r = np.reshape(r, [-1])
-                # print r
+                df_test_batch = df_test.sample(100)
+                test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0)
+                test_loss, test_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=test_feed)
+                test_accuracy = self.check_accuray(df_train_batch['Survived'], test_pred)
+
+                print 'epoch: %d, train_loss: %5f, train_accuracy: %5f, test_loss: %5f, test_accuracy: %5f' \
+                    % (epoch, train_loss, train_accuracy, test_loss, test_accuracy)
+
             # break
         return
+
+    def check_accuray(self, label, pred):
+        pred = np.reshape(pred, [-1])
+        size = np.shape(pred)[0]
+        pred[pred >= 0.5] = 1
+        pred[pred < 0.5] = 0
+        correct = np.sum(pred == label)
+        return float(correct) / size
 
     def restore(self):
         checkpoint = tf.train.get_checkpoint_state(CHECKPOINT_DIR)
