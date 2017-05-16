@@ -13,7 +13,7 @@ from sklearn.model_selection import train_test_split
 
 
 BATCH_SIZE = 32
-ALPHA = 1e-4
+ALPHA = 0.05
 CHECKPOINT_DIR = './tmp'
 
 
@@ -43,26 +43,26 @@ class Network(object):
             feature_columns=deep_columns
         )
 
-        W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 512])
-        b_fc1 = bias_variable([512])
+        W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 100])
+        b_fc1 = bias_variable([100])
         h_fc1 = tf.nn.relu(tf.matmul(input_deep, W_fc1) + b_fc1)
 
-        W_fc2 = weight_variable([512, 256])
-        b_fc2 = bias_variable([256])
+        W_fc2 = weight_variable([100, 50])
+        b_fc2 = bias_variable([50])
         h_fc2 = tf.nn.relu(tf.matmul(h_fc1, W_fc2) + b_fc2)
 
-        W_fc3 = weight_variable([256, 128])
-        b_fc3 = bias_variable([128])
-        h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
+        # W_fc3 = weight_variable([50, 128])
+        # b_fc3 = bias_variable([128])
+        # h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
 
-        W_fc4 = weight_variable([128, 1])
+        W_fc4 = weight_variable([50, 1])
         b_fc4 = bias_variable([1])
-        h_fc4 = tf.nn.relu(tf.matmul(h_fc3, W_fc4) + b_fc4)
+        h_fc4 = tf.nn.relu(tf.matmul(h_fc2, W_fc4) + b_fc4)
 
         self.keep_prob = tf.placeholder(tf.float32)
         h_fc4_drop = tf.nn.dropout(h_fc4, self.keep_prob)
 
-        h_merge = tf.add(out_wide, h_fc4_drop)
+        h_merge = out_wide + h_fc4_drop
         self.out_p = tf.nn.sigmoid(h_merge)
 
         # loss function
@@ -181,7 +181,7 @@ class Trainer(object):
         # train_size = df_train.shape[0]
         for epoch in range(int(1e7)):
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=0.7)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
             self.session.run(self.apply_gradient, feed_dict=train_feed)
 
             if epoch % 10001 == 0:
