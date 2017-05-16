@@ -15,7 +15,7 @@ from six.moves import urllib
 
 
 BATCH_SIZE = 128
-ALPHA = 0.05
+ALPHA = 0.00001
 CHECKPOINT_DIR = './tmp'
 
 LABEL_COLUMN = "label"
@@ -65,21 +65,23 @@ class Network(object):
     def __init__(self, wide_columns, deep_columns, holders_dict):
         self.linear_parent_scope = 'linear'
         self.dnn_parent_scope = 'dnn'
-        with tf.variable_scope(self.linear_parent_scope) as linear_input_scope:
-            # linear
-            out_wide, _, _ = tf.contrib.layers.weighted_sum_from_feature_columns(
-                columns_to_tensors=holders_dict,
-                feature_columns=wide_columns,
-                num_outputs=1,
-                weight_collections=[self.linear_parent_scope],
-                scope=linear_input_scope
-            )
+        # with tf.variable_scope(self.linear_parent_scope) as linear_input_scope:
+        #     # linear
+        #     out_wide, _, _ = tf.contrib.layers.weighted_sum_from_feature_columns(
+        #         columns_to_tensors=holders_dict,
+        #         feature_columns=wide_columns,
+        #         num_outputs=1,
+        #         weight_collections=[self.linear_parent_scope],
+        #         scope=linear_input_scope
+        #     )
 
         with tf.variable_scope(self.dnn_parent_scope) as dnn_input_scope:
             # dnn
             input_deep = tf.contrib.layers.input_from_feature_columns(
                 columns_to_tensors=holders_dict,
-                feature_columns=deep_columns
+                feature_columns=deep_columns,
+                weight_collections=[self.dnn_parent_scope],
+                scope=dnn_input_scope
             )
 
             W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 100])
@@ -94,29 +96,27 @@ class Network(object):
             # b_fc3 = bias_variable([128])
             # h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
 
-            W_fc4 = weight_variable([50, 1])
-            b_fc4 = bias_variable([1])
-            h_fc4 = tf.nn.relu(tf.matmul(h_fc2, W_fc4) + b_fc4)
-
             self.keep_prob = tf.placeholder(tf.float32)
-            h_fc4_drop = tf.nn.dropout(h_fc4, self.keep_prob)
+            h_fc2_drop = tf.nn.dropout(h_fc2, self.keep_prob)
 
-            h_merge = out_wide + h_fc4_drop
-            self.out_p = tf.nn.sigmoid(h_merge)
+            W_fc4 = weight_variable([50, 2])
+            b_fc4 = bias_variable([2])
+            self.readout = tf.matmul(h_fc2_drop, W_fc4) + b_fc4
+
+            # h_merge = out_wide + h_fc4_drop
+            # h_merge = h_fc4_drop
+            # self.out_p = tf.nn.sigmoid(h_fc4_drop)
+
+            # self.out_p = tf.nn.sigmoid(out_wide)
 
         # loss function
-        self.y = tf.placeholder(tf.float32, [None, 1], name='holder_y')
-        self.loss = tf.losses.log_loss(self.y, self.out_p, epsilon=1e-15)
+        self.y = tf.placeholder(tf.int32, [None], name='holder_y')
+        self.y_ = tf.one_hot(self.y, 2, on_value=1, off_value=0, dtype=tf.int32)
+        # self.loss = tf.losses.log_loss(self.y, self.out_p, epsilon=1e-15)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.y_, logits=self.readout))
+        correct_prediction = tf.equal(tf.argmax(self.y_, 1), tf.argmax(self.readout, 1))
+        self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-        # print '=========================================='
-        # with tf.variable_scope(linear_parent_scope) as scope:
-        #     # print tf.trainable_variables()
-        #     # print '=========================================='
-        #     # print tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, linear_parent_scope)
-        #     # print '=========================================='
-        #     # print tf.get_collection(tf.GraphKeys.VARIABLES, linear_parent_scope)
-        #     print '=========================================='
-        #     print tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
         return
 
 
@@ -134,19 +134,24 @@ class Trainer(object):
         self.wide_columns, self.deep_columns, self.holders_dict = self.create_feature_columns()
         self.net = Network(self.wide_columns, self.deep_columns, self.holders_dict)
 
-        linear_optimizer = tf.train.FtrlOptimizer(learning_rate=0.2)
-        linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
-        # linear_vars = tf.trainable_variables()
-        linear_grad_and_vars = linear_optimizer.compute_gradients(self.net.loss, linear_vars)
-        linear_apply_grad = linear_optimizer.apply_gradients(linear_grad_and_vars)
+        # linear_optimizer = tf.train.FtrlOptimizer(learning_rate=0.2)
+        # linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
+        # # linear_vars = tf.trainable_variables()
+        # linear_grad_and_vars = linear_optimizer.compute_gradients(self.net.loss, linear_vars)
+        # linear_apply_grad = linear_optimizer.apply_gradients(linear_grad_and_vars)
+        # self.apply_gradient = linear_apply_grad
 
-        dnn_optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
-        dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
+        # dnn_optimizer = tf.train.AdamOptimizer(learning_rate=0.0005)
+        # # dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
         # dnn_vars = tf.trainable_variables()
-        dnn_grad_and_vars = dnn_optimizer.compute_gradients(self.net.loss, dnn_vars)
-        dnn_apply_grad = dnn_optimizer.apply_gradients(dnn_grad_and_vars)
+        # dnn_grad_and_vars = dnn_optimizer.compute_gradients(self.net.loss, dnn_vars)
+        # dnn_apply_grad = dnn_optimizer.apply_gradients(dnn_grad_and_vars)
+        # self.apply_gradient = dnn_apply_grad
 
-        self.apply_gradient = tf.group(*[linear_apply_grad, dnn_apply_grad])
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=ALPHA)
+        self.apply_gradient = self.optimizer.minimize(self.net.loss)
+
+        # self.apply_gradient = tf.group(*[linear_apply_grad, dnn_apply_grad])
 
         self.session = tf.Session(config=tf.ConfigProto(log_device_placement=False, allow_soft_placement=True))
         self.session.run(tf.global_variables_initializer())
@@ -239,7 +244,8 @@ class Trainer(object):
             feed_dict[self.holders_dict[key]] = np.reshape(df_batch[key].values, [-1, 1])
 
         feed_dict.update({
-            self.net.y: np.reshape(df_batch[LABEL_COLUMN].values, [-1, 1]),
+            # self.net.y: np.reshape(df_batch[LABEL_COLUMN].values, [-1, 1]),
+            self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
             self.net.keep_prob: keep_prob
         })
 
@@ -253,6 +259,9 @@ class Trainer(object):
         df_train = df_train.dropna(how='any', axis=0)
         df_test = df_train.dropna(how='any', axis=0)
 
+        df_train = df_train.sample(frac=1.0)
+        df_test = df_test.sample(frac=1.0)
+
         df_train[LABEL_COLUMN] = (df_train["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         df_test[LABEL_COLUMN] = (df_test["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         # train_size = df_train.shape[0]
@@ -265,8 +274,8 @@ class Trainer(object):
             self.global_t += 1
             epoch = self.global_t
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=0.5)
-            self.session.run(self.apply_gradient, feed_dict=train_feed)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
+            # self.session.run(self.apply_gradient, feed_dict=train_feed)
 
             if epoch % 1000 == 0:
                 self.backup()
@@ -274,18 +283,21 @@ class Trainer(object):
             if epoch % 100 == 0:
                 df_train_batch = df_train.sample(100)
                 train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0)
-                train_loss, train_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=train_feed)
-                train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_pred)
+                train_loss, train_accuracy = self.session.run([self.net.loss, self.net.accuracy], feed_dict=train_feed)
+                # train_loss, train_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=train_feed)
+                # train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_pred)
 
                 df_test_batch = df_test.sample(100)
                 test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0)
-                test_loss, test_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=test_feed)
-                test_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN], test_pred)
+                test_loss, test_accuracy = self.session.run([self.net.loss, self.net.accuracy], feed_dict=test_feed)
+                # test_loss, test_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=test_feed)
+                # test_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN], test_pred)
 
                 print 'epoch: %d, train_loss: %5f, train_accuracy: %5f, test_loss: %5f, test_accuracy: %5f' \
                     % (epoch, train_loss, train_accuracy, test_loss, test_accuracy)
 
-            # break
+            # if epoch == 100:
+            #     break
         return
 
     def check_accuray(self, label, pred):

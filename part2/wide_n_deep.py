@@ -186,8 +186,7 @@ def train_and_eval(model_dir, model_type, train_steps, train_data, test_data):
 
   m = build_estimator(model_dir, model_type)
   m.fit(input_fn=lambda: input_fn(df_train), steps=train_steps)
-  # results = m.evaluate(input_fn=lambda: input_fn(df_test), steps=1)
-  results = m.evaluate(input_fn=lambda: input_fn(df_train), steps=1)
+  results = m.evaluate(input_fn=lambda: input_fn(df_test), steps=1)
   for key in sorted(results):
     print("%s: %s" % (key, results[key]))
 
