@@ -14,8 +14,8 @@ import tempfile
 from six.moves import urllib
 
 
-BATCH_SIZE = 128
-ALPHA = 0.00001
+BATCH_SIZE = 32
+ALPHA = 1e-3
 CHECKPOINT_DIR = './tmp'
 
 LABEL_COLUMN = "label"
@@ -65,15 +65,15 @@ class Network(object):
     def __init__(self, wide_columns, deep_columns, holders_dict):
         self.linear_parent_scope = 'linear'
         self.dnn_parent_scope = 'dnn'
-        # with tf.variable_scope(self.linear_parent_scope) as linear_input_scope:
-        #     # linear
-        #     out_wide, _, _ = tf.contrib.layers.weighted_sum_from_feature_columns(
-        #         columns_to_tensors=holders_dict,
-        #         feature_columns=wide_columns,
-        #         num_outputs=1,
-        #         weight_collections=[self.linear_parent_scope],
-        #         scope=linear_input_scope
-        #     )
+        with tf.variable_scope(self.linear_parent_scope) as linear_input_scope:
+            # linear
+            out_wide, _, _ = tf.contrib.layers.weighted_sum_from_feature_columns(
+                columns_to_tensors=holders_dict,
+                feature_columns=wide_columns,
+                num_outputs=2,
+                weight_collections=[self.linear_parent_scope],
+                scope=linear_input_scope
+            )
 
         with tf.variable_scope(self.dnn_parent_scope) as dnn_input_scope:
             # dnn
@@ -84,31 +84,34 @@ class Network(object):
                 scope=dnn_input_scope
             )
 
-            W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 100])
-            b_fc1 = bias_variable([100])
+            W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 512])
+            b_fc1 = bias_variable([512])
             h_fc1 = tf.nn.relu(tf.matmul(input_deep, W_fc1) + b_fc1)
 
-            W_fc2 = weight_variable([100, 50])
-            b_fc2 = bias_variable([50])
+            W_fc2 = weight_variable([512, 256])
+            b_fc2 = bias_variable([256])
             h_fc2 = tf.nn.relu(tf.matmul(h_fc1, W_fc2) + b_fc2)
 
-            # W_fc3 = weight_variable([50, 128])
-            # b_fc3 = bias_variable([128])
-            # h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
+            W_fc3 = weight_variable([256, 128])
+            b_fc3 = bias_variable([128])
+            h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
 
             self.keep_prob = tf.placeholder(tf.float32)
-            h_fc2_drop = tf.nn.dropout(h_fc2, self.keep_prob)
+            h_drop = tf.nn.dropout(h_fc3, self.keep_prob)
 
-            W_fc4 = weight_variable([50, 2])
+            W_fc4 = weight_variable([128, 2])
             b_fc4 = bias_variable([2])
-            self.readout = tf.matmul(h_fc2_drop, W_fc4) + b_fc4
+            h_fc4 = tf.matmul(h_drop, W_fc4) + b_fc4
+            # self.readout = tf.matmul(h_drop, W_fc4) + b_fc4
 
-            # h_merge = out_wide + h_fc4_drop
+            # h_merge = out_wide + h_f4
             # h_merge = h_fc4_drop
             # self.out_p = tf.nn.sigmoid(h_fc4_drop)
 
             # self.out_p = tf.nn.sigmoid(out_wide)
 
+        # self.readout = out_wide
+        self.readout = out_wide + h_fc4
         # loss function
         self.y = tf.placeholder(tf.int32, [None], name='holder_y')
         self.y_ = tf.one_hot(self.y, 2, on_value=1, off_value=0, dtype=tf.int32)
@@ -265,10 +268,15 @@ class Trainer(object):
         df_train[LABEL_COLUMN] = (df_train["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         df_test[LABEL_COLUMN] = (df_test["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
 
+
         print '---------------------------------------------------'
         print 'pos:', np.sum(df_train[LABEL_COLUMN] == 1)
         print 'neg:', np.sum(df_train[LABEL_COLUMN] == 0)
         print '---------------------------------------------------'
+        df_t1 = df_test.loc[df_test[LABEL_COLUMN] == 1]
+        df_t2 = df_test.loc[df_test[LABEL_COLUMN] == 0].sample(df_t1.shape[0])
+        df_test = pd.concat([df_t1, df_t2])
+        print df_t1.shape
         print 'pos:', np.sum(df_test[LABEL_COLUMN] == 1)
         print 'neg:', np.sum(df_test[LABEL_COLUMN] == 0)
         print '---------------------------------------------------'
@@ -283,8 +291,8 @@ class Trainer(object):
             self.global_t += 1
             epoch = self.global_t
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
-            # self.session.run(self.apply_gradient, feed_dict=train_feed)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=0.7)
+            self.session.run(self.apply_gradient, feed_dict=train_feed)
 
             if epoch % 1000 == 0:
                 self.backup()
