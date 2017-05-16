@@ -10,11 +10,44 @@ import random
 import pandas as pd
 import os
 from sklearn.model_selection import train_test_split
+import tempfile
+from six.moves import urllib
 
 
 BATCH_SIZE = 32
 ALPHA = 0.05
 CHECKPOINT_DIR = './tmp'
+
+LABEL_COLUMN = "label"
+COLUMNS = ["age", "workclass", "fnlwgt", "education", "education_num",
+           "marital_status", "occupation", "relationship", "race", "gender",
+           "capital_gain", "capital_loss", "hours_per_week", "native_country",
+           "income_bracket"]
+
+
+def maybe_download(train_data, test_data):
+    """Maybe downloads training data and returns train and test file names."""
+    if train_data:
+        train_file_name = train_data
+    else:
+        train_file = tempfile.NamedTemporaryFile(delete=False)
+        urllib.request.urlretrieve("http://mlr.cs.umass.edu/ml/machine-learning-databases/adult/adult.data",
+                                   train_file.name)  # pylint: disable=line-too-long
+        train_file_name = train_file.name
+        train_file.close()
+        print("Training data is downloaded to %s" % train_file_name)
+
+    if test_data:
+        test_file_name = test_data
+    else:
+        test_file = tempfile.NamedTemporaryFile(delete=False)
+        urllib.request.urlretrieve("http://mlr.cs.umass.edu/ml/machine-learning-databases/adult/adult.test",
+                                   test_file.name)  # pylint: disable=line-too-long
+        test_file_name = test_file.name
+        test_file.close()
+        print("Test data is downloaded to %s" % test_file_name)
+
+    return train_file_name, test_file_name
 
 
 def weight_variable(shape):
@@ -90,21 +123,26 @@ class Network(object):
 class Trainer(object):
 
     def __init__(self):
-
-        self.columns_categorical = ["Name", "Sex", "Embarked", "Cabin"]
-        self.columns_continous = ["Age", "SibSp", "Parch", "Fare", "PassengerId", "Pclass"]
+        self.columns_categorical = ["workclass", "education", "marital_status", "occupation",
+                                    "relationship", "race", "gender", "native_country"]
+        self.columns_continous = ["age", "education_num", "capital_gain", "capital_loss",
+                                  "hours_per_week"]
+        # self.columns_categorical = ["Name", "Sex", "Embarked", "Cabin"]
+        # self.columns_continous = ["Age", "SibSp", "Parch", "Fare", "PassengerId", "Pclass"]
         self.columns = set(self.columns_categorical + self.columns_continous)
 
         self.wide_columns, self.deep_columns, self.holders_dict = self.create_feature_columns()
         self.net = Network(self.wide_columns, self.deep_columns, self.holders_dict)
 
         linear_optimizer = tf.train.FtrlOptimizer(learning_rate=0.2)
-        linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
+        # linear_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.linear_parent_scope)
+        linear_vars = tf.trainable_variables()
         linear_grad_and_vars = linear_optimizer.compute_gradients(self.net.loss, linear_vars)
         linear_apply_grad = linear_optimizer.apply_gradients(linear_grad_and_vars)
 
         dnn_optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
-        dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
+        # dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
+        dnn_vars = tf.trainable_variables()
         dnn_grad_and_vars = dnn_optimizer.compute_gradients(self.net.loss, dnn_vars)
         dnn_apply_grad = dnn_optimizer.apply_gradients(dnn_grad_and_vars)
 
@@ -122,38 +160,60 @@ class Trainer(object):
     def create_feature_columns(self):
         """Build an estimator."""
         # Categorical columns
-        sex = sparse_column_with_keys(column_name="Sex", keys=["female", "male"])
-        embarked = sparse_column_with_keys(column_name="Embarked", keys=["C", "S", "Q"])
 
-        cabin = sparse_column_with_hash_bucket("Cabin", hash_bucket_size=1000)
-        name = sparse_column_with_hash_bucket("Name", hash_bucket_size=1000)
+        gender = tf.contrib.layers.sparse_column_with_keys(column_name="gender",
+                                                           keys=["Female", "Male"])
+        education = tf.contrib.layers.sparse_column_with_hash_bucket(
+            "education", hash_bucket_size=1000)
+        relationship = tf.contrib.layers.sparse_column_with_hash_bucket(
+            "relationship", hash_bucket_size=100)
+        workclass = tf.contrib.layers.sparse_column_with_hash_bucket(
+            "workclass", hash_bucket_size=100)
+        occupation = tf.contrib.layers.sparse_column_with_hash_bucket(
+            "occupation", hash_bucket_size=1000)
+        native_country = tf.contrib.layers.sparse_column_with_hash_bucket(
+            "native_country", hash_bucket_size=1000)
 
-        # Continuous columns
-        age = real_valued_column("Age")
-        passenger_id = real_valued_column("PassengerId")
-        sib_sp = real_valued_column("SibSp")
-        parch = real_valued_column("Parch")
-        fare = real_valued_column("Fare")
-        p_class = real_valued_column("Pclass")
+        # Continuous base columns.
+        age = tf.contrib.layers.real_valued_column("age")
+        education_num = tf.contrib.layers.real_valued_column("education_num")
+        capital_gain = tf.contrib.layers.real_valued_column("capital_gain")
+        capital_loss = tf.contrib.layers.real_valued_column("capital_loss")
+        hours_per_week = tf.contrib.layers.real_valued_column("hours_per_week")
 
         # Transformations.
-        age_buckets = bucketized_column(age, boundaries=[5, 18, 25, 30, 35, 40, 45, 50, 55, 65])
+        age_buckets = tf.contrib.layers.bucketized_column(age,
+                                                          boundaries=[
+                                                              18, 25, 30, 35, 40, 45,
+                                                              50, 55, 60, 65
+                                                          ])
+
         # Wide columns and deep columns.
-        wide_columns = [sex, embarked, cabin, name, age_buckets,
-                        # crossed_column([age_buckets, sex], hash_bucket_size=int(1e6)),
-                        # crossed_column([embarked, name], hash_bucket_size=int(1e4))
-                        ]
+        wide_columns = [
+            age_buckets
+            # gender, native_country, education, occupation, workclass,
+            # relationship, age_buckets,
+            # tf.contrib.layers.crossed_column([education, occupation],
+            #                                  hash_bucket_size=int(1e4)),
+            # tf.contrib.layers.crossed_column(
+            #     [age_buckets, education, occupation],
+            #     hash_bucket_size=int(1e6)),
+            # tf.contrib.layers.crossed_column([native_country, occupation],
+            #                                  hash_bucket_size=int(1e4))
+        ]
         deep_columns = [
-            embedding_column(sex, dimension=8),
-            embedding_column(embarked, dimension=8),
-            embedding_column(cabin, dimension=8),
-            embedding_column(name, dimension=8),
+            # tf.contrib.layers.embedding_column(workclass, dimension=8),
+            # tf.contrib.layers.embedding_column(education, dimension=8),
+            # tf.contrib.layers.embedding_column(gender, dimension=8),
+            # tf.contrib.layers.embedding_column(relationship, dimension=8),
+            # tf.contrib.layers.embedding_column(native_country,
+            #                                    dimension=8),
+            # tf.contrib.layers.embedding_column(occupation, dimension=8),
             age,
-            passenger_id,
-            sib_sp,
-            parch,
-            fare,
-            p_class
+            # education_num,
+            # capital_gain,
+            # capital_loss,
+            # hours_per_week,
         ]
 
         feat_colums = wide_columns + deep_columns
@@ -163,7 +223,11 @@ class Trainer(object):
                 continue
             holder_name = 'holder_' + c.name
             holders_dict[c.name] = tf.placeholder(c.dtype, [None], name=holder_name)
-
+            # holders_dict[c.name] = tf.placeholder(tf.float32, [None], name=holder_name)
+        # print '---------------------------------------------------'
+        # print '---------------------------------------------------'
+        # print '---------------------------------------------------'
+        # print holders_dict
         return wide_columns, deep_columns, holders_dict
 
     def create_feed_dict(self, df_batch, keep_prob=0.7):
@@ -179,27 +243,31 @@ class Trainer(object):
         # feature = dict(continuous_cols)
         # feature.update(categorical_cols)
 
-        feed_dict = {
-            self.holders_dict['Name']: df_batch['Name'].values,
-            self.holders_dict['Sex']: df_batch['Sex'].values,
-            self.holders_dict['Embarked']: df_batch['Embarked'].values,
-            self.holders_dict['Cabin']: df_batch['Cabin'].values,
-            self.holders_dict['Age']: df_batch['Age'].values,
-            self.holders_dict['SibSp']: df_batch['SibSp'].values,
-            self.holders_dict['Parch']: df_batch['Parch'].values,
-            self.holders_dict['Fare']: df_batch['Fare'].values,
-            self.holders_dict['PassengerId']: df_batch['PassengerId'].values,
-            self.holders_dict['Pclass']: df_batch['Pclass'].values,
+        print '---------------------------------------------------'
+        print '---------------------------------------------------'
+        print '---------------------------------------------------'
+        feed_dict = {}
+        for key in self.holders_dict:
+            print df_batch[key].values.astype(float)
+            # feed_dict[self.holders_dict[key]] = df_batch[key].values
 
-            self.net.y: np.reshape(df_batch['Survived'].values, [-1, 1]),
+        feed_dict.update({
+            self.net.y: np.reshape(df_batch[LABEL_COLUMN].values, [-1, 1]),
             self.net.keep_prob: keep_prob
-        }
+        })
+        print '---------------------------------------------------'
+        print '---------------------------------------------------'
+        print '---------------------------------------------------'
+        # print df_batch
 
         return feed_dict
 
     def run(self):
 
-        df_data = pd.read_csv(tf.gfile.Open("./train.csv"), skipinitialspace=True)
+        df_data = pd.read_csv(tf.gfile.Open("./adult.data"), names=COLUMNS, skipinitialspace=True)
+        df_data = df_data.dropna(how='any', axis=0)
+
+        df_data[LABEL_COLUMN] = (df_data["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         # train_size = df_train.shape[0]
         # df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
         df_train, df_test = train_test_split(df_data, test_size=0.2, random_state=0)
@@ -220,12 +288,12 @@ class Trainer(object):
                 df_train_batch = df_train.sample(100)
                 train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0)
                 train_loss, train_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=train_feed)
-                train_accuracy = self.check_accuray(df_train_batch['Survived'].values, train_pred)
+                train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_pred)
 
                 df_test_batch = df_test.sample(100)
                 test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0)
                 test_loss, test_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=test_feed)
-                test_accuracy = self.check_accuray(df_train_batch['Survived'], test_pred)
+                test_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN], test_pred)
 
                 print 'epoch: %d, train_loss: %5f, train_accuracy: %5f, test_loss: %5f, test_accuracy: %5f' \
                     % (epoch, train_loss, train_accuracy, test_loss, test_accuracy)
@@ -277,3 +345,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # maybe_download(None, None)
