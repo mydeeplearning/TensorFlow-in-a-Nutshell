@@ -30,42 +30,6 @@ def bias_variable(shape):
 class Network(object):
 
     def __init__(self, wide_columns, deep_columns, holders_dict):
-<<<<<<< HEAD
-        # linear
-        out_wide, _, _ = tf.contrib.layers.weighted_sum_from_feature_columns(
-            columns_to_tensors=holders_dict,
-            feature_columns=wide_columns,
-            num_outputs=1
-        )
-
-        # dnn
-        input_deep = tf.contrib.layers.input_from_feature_columns(
-            columns_to_tensors=holders_dict,
-            feature_columns=deep_columns
-        )
-
-        W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 100])
-        b_fc1 = bias_variable([100])
-        h_fc1 = tf.nn.relu(tf.matmul(input_deep, W_fc1) + b_fc1)
-
-        W_fc2 = weight_variable([100, 50])
-        b_fc2 = bias_variable([50])
-        h_fc2 = tf.nn.relu(tf.matmul(h_fc1, W_fc2) + b_fc2)
-
-        # W_fc3 = weight_variable([50, 128])
-        # b_fc3 = bias_variable([128])
-        # h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
-
-        W_fc4 = weight_variable([50, 1])
-        b_fc4 = bias_variable([1])
-        h_fc4 = tf.nn.relu(tf.matmul(h_fc2, W_fc4) + b_fc4)
-
-        self.keep_prob = tf.placeholder(tf.float32)
-        h_fc4_drop = tf.nn.dropout(h_fc4, self.keep_prob)
-
-        h_merge = out_wide + h_fc4_drop
-        self.out_p = tf.nn.sigmoid(h_merge)
-=======
         linear_parent_scope = 'linear'
         dnn_parent_scope = 'dnn'
         with tf.variable_scope(linear_parent_scope) as linear_input_scope:
@@ -85,28 +49,27 @@ class Network(object):
                 feature_columns=deep_columns
             )
 
-            W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 512])
-            b_fc1 = bias_variable([512])
+            W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 100])
+            b_fc1 = bias_variable([100])
             h_fc1 = tf.nn.relu(tf.matmul(input_deep, W_fc1) + b_fc1)
 
-            W_fc2 = weight_variable([512, 256])
-            b_fc2 = bias_variable([256])
+            W_fc2 = weight_variable([100, 50])
+            b_fc2 = bias_variable([50])
             h_fc2 = tf.nn.relu(tf.matmul(h_fc1, W_fc2) + b_fc2)
 
-            W_fc3 = weight_variable([256, 128])
-            b_fc3 = bias_variable([128])
-            h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
+            # W_fc3 = weight_variable([50, 128])
+            # b_fc3 = bias_variable([128])
+            # h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
 
-            W_fc4 = weight_variable([128, 1])
+            W_fc4 = weight_variable([50, 1])
             b_fc4 = bias_variable([1])
-            h_fc4 = tf.nn.relu(tf.matmul(h_fc3, W_fc4) + b_fc4)
+            h_fc4 = tf.nn.relu(tf.matmul(h_fc2, W_fc4) + b_fc4)
 
             self.keep_prob = tf.placeholder(tf.float32)
             h_fc4_drop = tf.nn.dropout(h_fc4, self.keep_prob)
 
-            h_merge = tf.add(out_wide, h_fc4_drop)
+            h_merge = out_wide + h_fc4_drop
             self.out_p = tf.nn.sigmoid(h_merge)
->>>>>>> bc241b80bc157fe3fdd2e565c13b7c9129eeaddb
 
         # loss function
         self.y = tf.placeholder(tf.float32, [None, 1], name='holder_y')
