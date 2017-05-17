@@ -76,7 +76,7 @@ class Network(object):
 
             W_fc3 = weight_variable([50, 2])
             b_fc3 = bias_variable([2])
-            h_fc3 = tf.matmul(h_drop, W_fc3) + b_fc3
+            h_fc3 = tf.matmul(h_drop, W_fc3) + b_fc3 + out_wide
 
         self.out_p = tf.nn.softmax(h_fc3)
         self.readout = tf.argmax(h_fc3, 1)
@@ -105,19 +105,20 @@ class Trainer(object):
         # # linear_vars = tf.trainable_variables()
         # linear_grad_and_vars = linear_optimizer.compute_gradients(self.net.loss, linear_vars)
         # linear_apply_grad = linear_optimizer.apply_gradients(linear_grad_and_vars)
-        # self.apply_gradient = linear_apply_grad
+        # self.apply_gradients = linear_apply_grad
 
         # dnn_optimizer = tf.train.AdamOptimizer(learning_rate=0.0005)
         # # dnn_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.net.dnn_parent_scope)
         # dnn_vars = tf.trainable_variables()
         # dnn_grad_and_vars = dnn_optimizer.compute_gradients(self.net.loss, dnn_vars)
         # dnn_apply_grad = dnn_optimizer.apply_gradients(dnn_grad_and_vars)
-        # self.apply_gradient = dnn_apply_grad
+        # self.apply_gradients = dnn_apply_grad
+        # self.apply_gradients = tf.group(*[linear_apply_grad, dnn_apply_grad])
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=ALPHA)
-        self.apply_gradient = self.optimizer.minimize(self.net.loss)
-
-        # self.apply_gradient = tf.group(*[linear_apply_grad, dnn_apply_grad])
+        grad_vars = self.optimizer.compute_gradients(self.net.loss)
+        grad_vars = [(None if grad is None else tf.clip_by_norm(grad, 5.0), var) for grad, var in grad_vars]
+        self.apply_gradients = self.optimizer.apply_gradients(grad_vars)
 
         self.session = tf.Session(config=tf.ConfigProto(log_device_placement=False, allow_soft_placement=True))
         self.session.run(tf.global_variables_initializer())
@@ -164,13 +165,13 @@ class Trainer(object):
         wide_columns = [
             gender, native_country, education, occupation, workclass,
             relationship, age_buckets,
-            tf.contrib.layers.crossed_column([education, occupation],
-                                             hash_bucket_size=int(1e4)),
-            tf.contrib.layers.crossed_column(
-                [age_buckets, education, occupation],
-                hash_bucket_size=int(1e6)),
-            tf.contrib.layers.crossed_column([native_country, occupation],
-                                             hash_bucket_size=int(1e4))
+            # tf.contrib.layers.crossed_column([education, occupation],
+            #                                  hash_bucket_size=int(1e4)),
+            # tf.contrib.layers.crossed_column(
+            #     [age_buckets, education, occupation],
+            #     hash_bucket_size=int(1e6)),
+            # tf.contrib.layers.crossed_column([native_country, occupation],
+            #                                  hash_bucket_size=int(1e4))
         ]
         deep_columns = [
             tf.contrib.layers.embedding_column(workclass, dimension=8),
@@ -253,7 +254,7 @@ class Trainer(object):
             for k in range(num_of_batch):
                 df_batch = df_train.iloc[k * BATCH_SIZE: (k + 1) * BATCH_SIZE]
                 train_feed = self.create_feed_dict(df_batch, keep_prob=1.0, phrase=True)
-                self.session.run(self.apply_gradient, feed_dict=train_feed)
+                self.session.run(self.apply_gradients, feed_dict=train_feed)
                 # break
             # if epoch % 1000 == 1:
             #     self.backup()
@@ -289,7 +290,7 @@ class Trainer(object):
             # if epoch == 100:
             #     break
 
-        print 'avg: train=', np.mean(train_acc_list), ' / test=', np.mean(test_acc_list)
+        print 'avg: train=', np.mean(train_acc_list[50:]), ' / test=', np.mean(test_acc_list[50:])
         return
 
     def check_accuray(self, label, pred):
