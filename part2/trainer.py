@@ -12,6 +12,7 @@ import os
 from sklearn.model_selection import train_test_split
 import tempfile
 from six.moves import urllib
+import scipy as sp
 
 
 BATCH_SIZE = 32
@@ -49,6 +50,13 @@ def maybe_download(train_data, test_data):
 
     return train_file_name, test_file_name
 
+def logloss(act, pred):
+  epsilon = 1e-15
+  pred = sp.maximum(epsilon, pred)
+  pred = sp.minimum(1-epsilon, pred)
+  ll = sum(act*sp.log(pred) + sp.subtract(1,act)*sp.log(sp.subtract(1,pred)))
+  ll = ll * -1.0/len(act)
+  return ll
 
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.01)
