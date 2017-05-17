@@ -20,8 +20,8 @@ from six.moves import urllib
 import scipy as sp
 
 
-BATCH_SIZE = 32
-ALPHA = 1e-3
+BATCH_SIZE = 128
+ALPHA = 1e-4
 CHECKPOINT_DIR = './tmp'
 
 LABEL_COLUMN = "label"
@@ -100,23 +100,22 @@ class Network(object):
             )
 
             self.keep_prob = tf.placeholder(tf.float32)
-            self.phrase = tf.placeholder(tf.bool)
 
-            h_fc1 = fully_connected(input_deep, num_outputs=512)
-            h_norm1 = batch_norm(h_fc1, center=True, scale=True, is_training=self.phrase)
-            h_fc2 = fully_connected(h_norm1, num_outputs=256)
-            h_norm2 = batch_norm(h_fc2, center=True, scale=True, is_training=self.phrase)
-            h_fc3 = fully_connected(h_norm2, num_outputs=128)
-            h_norm3 = batch_norm(h_fc3, center=True, scale=True, is_training=self.phrase)
+            W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 100])
+            b_fc1 = bias_variable([100])
+            h_fc1 = tf.nn.relu(tf.matmul(input_deep, W_fc1) + b_fc1)
 
-            h_drop = dropout(h_norm3, self.keep_prob)
-            h_fc4 = fully_connected(h_drop, num_outputs=1, activation_fn=tf.nn.sigmoid)
-            # h_fc4 = fully_connected(h_drop, num_outputs=1, activation_fn=None)
+            W_fc2 = weight_variable([100, 50])
+            b_fc2 = bias_variable([50])
+            h_fc2 = tf.nn.relu(tf.matmul(h_fc1, W_fc2) + b_fc2)
 
-            # self.readout = tf.nn.sigmoid(out_wide)
+            h_drop = tf.nn.dropout(h_fc2, self.keep_prob)
 
-        self.h_fc3 = h_norm3
-        self.readout = tf.reshape(h_fc4, [-1])
+            W_fc3 = weight_variable([50, 1])
+            b_fc3 = bias_variable([1])
+            h_fc3 = tf.nn.sigmoid(tf.matmul(h_drop, W_fc3) + b_fc3)
+
+        self.readout = tf.reshape(h_fc3, [-1])
         # self.readout = out_wide
         # self.readout = out_wide + h_fc4
         self.y = tf.placeholder(tf.float32, [None], name='holder_y')
@@ -252,7 +251,6 @@ class Trainer(object):
             # self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
             self.net.y: df_batch[LABEL_COLUMN].values,
             self.net.keep_prob: keep_prob,
-            self.net.phrase: phrase,
         })
 
         return feed_dict
@@ -265,72 +263,63 @@ class Trainer(object):
         df_train = df_train.dropna(how='any', axis=0)
         df_test = df_test.dropna(how='any', axis=0)
 
-        df_train = df_train.sample(frac=1.0)
-        df_test = df_test.sample(frac=1.0)
-
         df_train[LABEL_COLUMN] = (df_train["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         df_test[LABEL_COLUMN] = (df_test["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
 
         print '---------------------------------------------------'
-        print 'pos:', np.sum(df_train[LABEL_COLUMN] == 1)
-        print 'neg:', np.sum(df_train[LABEL_COLUMN] == 0)
+        df_t1 = df_train.loc[df_train[LABEL_COLUMN] == 1]
+        df_t2 = df_train.loc[df_train[LABEL_COLUMN] == 0].sample(df_t1.shape[0])
+        df_train = pd.concat([df_t1, df_t2])
+        print 'train pos:', np.sum(df_train[LABEL_COLUMN] == 1)
+        print 'train neg:', np.sum(df_train[LABEL_COLUMN] == 0)
         print '---------------------------------------------------'
         df_t1 = df_test.loc[df_test[LABEL_COLUMN] == 1]
         df_t2 = df_test.loc[df_test[LABEL_COLUMN] == 0].sample(df_t1.shape[0])
         df_test = pd.concat([df_t1, df_t2])
         print df_t1.shape
-        print 'pos:', np.sum(df_test[LABEL_COLUMN] == 1)
-        print 'neg:', np.sum(df_test[LABEL_COLUMN] == 0)
+        print 'test pos:', np.sum(df_test[LABEL_COLUMN] == 1)
+        print 'test neg:', np.sum(df_test[LABEL_COLUMN] == 0)
+        train_size = df_train.shape[0]
+        num_of_batch = int(train_size / BATCH_SIZE)
+        print 'num_of_batch', num_of_batch
         print '---------------------------------------------------'
-        # return
-        # train_size = df_train.shape[0]
-        # df_test = pd.read_csv(tf.gfile.Open("./test.csv"), skipinitialspace=True)
-        # df_train, df_test = train_test_split(df_data, test_size=0.2, random_state=0)
 
-        # train_size = df_train.shape[0]
-        print '===============checkpint: %d =========' % (self.global_t)
-        while self.global_t < int(1e8):
-            epoch = self.global_t
-            self.global_t += 1
-            df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0, phrase=True)
-            self.session.run(self.apply_gradient, feed_dict=train_feed)
+        for epoch in range(100):
+            df_train = df_train.sample(frac=1)
+            for k in range(num_of_batch):
+                df_batch = df_train.iloc[k * BATCH_SIZE: (k + 1) * BATCH_SIZE]
+                train_feed = self.create_feed_dict(df_batch, keep_prob=1.0, phrase=True)
+                self.session.run(self.apply_gradient, feed_dict=train_feed)
 
-            if epoch % 1000 == 1:
-                self.backup()
+            # if epoch % 1000 == 1:
+            #     self.backup()
 
-            if epoch % 100 == 0:
-                df_train_batch = df_train.sample(100)
-                train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0, phrase=False)
-                train_loss, train_readout, h_fc3 = self.session.run(
-                    [
-                        self.net.loss, self.net.readout, self.net.h_fc3
-                    ],
-                    feed_dict=train_feed
-                )
-                train_log_loss = logloss(df_train_batch[LABEL_COLUMN].values, train_readout)
-                train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_readout)
+            df_train_batch = df_train.sample(100)
+            train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0, phrase=False)
+            train_loss, train_readout = self.session.run(
+                [
+                    self.net.loss, self.net.readout
+                ],
+                feed_dict=train_feed
+            )
+            # train_log_loss = logloss(df_train_batch[LABEL_COLUMN].values, train_readout)
+            train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_readout)
 
-                print '=' * 30
-                print h_fc3
-                print train_readout
-                print '=' * 30
+            df_test_batch = df_test.sample(100)
+            test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0, phrase=False)
+            test_loss, test_readout = self.session.run(
+                [
+                    self.net.loss, self.net.readout
+                ],
+                feed_dict=test_feed
+            )
+            # test_log_loss = logloss(df_test_batch[LABEL_COLUMN].values, test_readout)
+            test_accuracy = self.check_accuray(df_test_batch[LABEL_COLUMN], test_readout)
 
-                df_test_batch = df_test.sample(100)
-                test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0, phrase=False)
-                test_loss, test_readout = self.session.run(
-                    [
-                        self.net.loss, self.net.readout
-                    ],
-                    feed_dict=test_feed
-                )
-                test_log_loss = logloss(df_test_batch[LABEL_COLUMN].values, test_readout)
-                test_accuracy = self.check_accuray(df_test_batch[LABEL_COLUMN], test_readout)
-
-                print ('epoch: %d \ train: loss=%0.3f, log_loss=%0.3f, accuracy=%0.3f,' +
-                       'test: loss=%0.3f, log_loss=%0.3f, accuracy=%0.3f') \
-                    % (epoch, train_loss, train_log_loss, train_accuracy,
-                       test_loss, test_log_loss, test_accuracy)
+            print ('epoch: %d \ train: loss=%0.3f, accuracy=%0.3f,' +
+                   'test: loss=%0.3f, accuracy=%0.3f') \
+                % (epoch, train_loss, train_accuracy,
+                   test_loss, test_accuracy)
 
             # if epoch == 100:
             #     break
@@ -338,6 +327,7 @@ class Trainer(object):
 
     def check_accuray(self, label, pred):
         size = np.shape(pred)[0]
+        pred = pred.copy()
         pred[pred >= 0.5] = 1
         pred[pred < 0.5] = 0
         correct = np.sum(pred == label)
@@ -368,12 +358,10 @@ def main():
     t = Trainer()
     t.run()
 
-    # df_train = pd.read_csv(tf.gfile.Open("./train.csv"), skipinitialspace=True)
-    # df_batch = df_train.sample(BATCH_SIZE)
-    # # print df_batch.shape
-    # # print df_batch['Survived']
-    # print df_batch['Name'].values
-
+    # act = np.zeros([100])
+    # pred = np.zeros([100])
+    # pred[0:80] = 1e-19
+    # print logloss(act, pred)
     return
 
 
