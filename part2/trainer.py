@@ -4,7 +4,11 @@ from tensorflow.contrib.layers import bucketized_column
 from tensorflow.contrib.layers import embedding_column
 from tensorflow.contrib.layers import crossed_column
 from tensorflow.contrib.layers import sparse_column_with_keys
-from tensorflow.contrib.layers import sparse_column_with_hash_bucket
+from tensorflow.contrib.layers import sparse_column_with_keys
+from tensorflow.contrib.layers import fully_connected
+from tensorflow.contrib.layers import dropout
+# from tensorflow.contrib.layers import layer_norm
+from tensorflow.contrib.layers import batch_norm
 import numpy as np
 import random
 import pandas as pd
@@ -95,29 +99,23 @@ class Network(object):
                 scope=dnn_input_scope
             )
 
-            W_fc1 = weight_variable([input_deep.get_shape().as_list()[-1], 512])
-            b_fc1 = bias_variable([512])
-            h_fc1 = tf.nn.relu(tf.matmul(input_deep, W_fc1) + b_fc1)
-
-            W_fc2 = weight_variable([512, 256])
-            b_fc2 = bias_variable([256])
-            h_fc2 = tf.nn.relu(tf.matmul(h_fc1, W_fc2) + b_fc2)
-
-            W_fc3 = weight_variable([256, 128])
-            b_fc3 = bias_variable([128])
-            h_fc3 = tf.nn.relu(tf.matmul(h_fc2, W_fc3) + b_fc3)
-
             self.keep_prob = tf.placeholder(tf.float32)
-            h_drop = tf.nn.dropout(h_fc3, self.keep_prob)
+            self.phrase = tf.placeholder(tf.bool)
 
-            W_fc4 = weight_variable([128, 1])
-            b_fc4 = bias_variable([1])
-            # h_fc4 = tf.nn.sigmoid(tf.matmul(h_drop, W_fc4) + b_fc4)
-            h_fc4 = tf.matmul(h_drop, W_fc4) + b_fc4
+            h_fc1 = fully_connected(input_deep, num_outputs=512)
+            h_norm1 = batch_norm(h_fc1, center=True, scale=True, is_training=self.phrase)
+            h_fc2 = fully_connected(h_norm1, num_outputs=256)
+            h_norm2 = batch_norm(h_fc2, center=True, scale=True, is_training=self.phrase)
+            h_fc3 = fully_connected(h_norm2, num_outputs=128)
+            h_norm3 = batch_norm(h_fc3, center=True, scale=True, is_training=self.phrase)
+
+            h_drop = dropout(h_norm3, self.keep_prob)
+            h_fc4 = fully_connected(h_drop, num_outputs=1, activation_fn=tf.nn.sigmoid)
+            # h_fc4 = fully_connected(h_drop, num_outputs=1, activation_fn=None)
 
             # self.readout = tf.nn.sigmoid(out_wide)
 
-        self.h_fc3 = h_fc3
+        self.h_fc3 = h_norm3
         self.readout = tf.reshape(h_fc4, [-1])
         # self.readout = out_wide
         # self.readout = out_wide + h_fc4
@@ -242,7 +240,7 @@ class Trainer(object):
         print '---------------------------------------------------'
         return wide_columns, deep_columns, holders_dict
 
-    def create_feed_dict(self, df_batch, keep_prob=0.7):
+    def create_feed_dict(self, df_batch, keep_prob=0.7, phrase=True):
 
         feed_dict = {}
         for key in self.holders_dict:
@@ -253,7 +251,8 @@ class Trainer(object):
         feed_dict.update({
             # self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
             self.net.y: df_batch[LABEL_COLUMN].values,
-            self.net.keep_prob: keep_prob
+            self.net.keep_prob: keep_prob,
+            self.net.phrase: phrase,
         })
 
         return feed_dict
@@ -291,18 +290,18 @@ class Trainer(object):
         # train_size = df_train.shape[0]
         print '===============checkpint: %d =========' % (self.global_t)
         while self.global_t < int(1e8):
-            self.global_t += 1
             epoch = self.global_t
+            self.global_t += 1
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0, phrase=True)
             self.session.run(self.apply_gradient, feed_dict=train_feed)
 
-            if epoch % 1000 == 0:
+            if epoch % 1000 == 1:
                 self.backup()
 
             if epoch % 100 == 0:
                 df_train_batch = df_train.sample(100)
-                train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0)
+                train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0, phrase=False)
                 train_loss, train_readout, h_fc3 = self.session.run(
                     [
                         self.net.loss, self.net.readout, self.net.h_fc3
@@ -315,13 +314,10 @@ class Trainer(object):
                 print '=' * 30
                 print h_fc3
                 print train_readout
-                # if math.isnan(train_log_loss) or 1 == 1:
-                #     print train_readout
-                #     print np.min(train_readout), np.max(train_readout)
-
                 print '=' * 30
+
                 df_test_batch = df_test.sample(100)
-                test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0)
+                test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0, phrase=False)
                 test_loss, test_readout = self.session.run(
                     [
                         self.net.loss, self.net.readout
