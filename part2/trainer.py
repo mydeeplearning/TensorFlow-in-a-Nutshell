@@ -1,22 +1,10 @@
 import tensorflow as tf
-from tensorflow.contrib.layers import real_valued_column
-from tensorflow.contrib.layers import bucketized_column
-from tensorflow.contrib.layers import embedding_column
-from tensorflow.contrib.layers import crossed_column
-from tensorflow.contrib.layers import sparse_column_with_keys
-from tensorflow.contrib.layers import sparse_column_with_keys
-from tensorflow.contrib.layers import fully_connected
-from tensorflow.contrib.layers import dropout
-# from tensorflow.contrib.layers import layer_norm
-from tensorflow.contrib.layers import batch_norm
-import numpy as np
 import random
 import pandas as pd
 import math
 import os
 from sklearn.model_selection import train_test_split
-import tempfile
-from six.moves import urllib
+import numpy as np
 import scipy as sp
 
 
@@ -29,31 +17,6 @@ COLUMNS = ["age", "workclass", "fnlwgt", "education", "education_num",
            "marital_status", "occupation", "relationship", "race", "gender",
            "capital_gain", "capital_loss", "hours_per_week", "native_country",
            "income_bracket"]
-
-
-def maybe_download(train_data, test_data):
-    """Maybe downloads training data and returns train and test file names."""
-    if train_data:
-        train_file_name = train_data
-    else:
-        train_file = tempfile.NamedTemporaryFile(delete=False)
-        urllib.request.urlretrieve("http://mlr.cs.umass.edu/ml/machine-learning-databases/adult/adult.data",
-                                   train_file.name)  # pylint: disable=line-too-long
-        train_file_name = train_file.name
-        train_file.close()
-        print("Training data is downloaded to %s" % train_file_name)
-
-    if test_data:
-        test_file_name = test_data
-    else:
-        test_file = tempfile.NamedTemporaryFile(delete=False)
-        urllib.request.urlretrieve("http://mlr.cs.umass.edu/ml/machine-learning-databases/adult/adult.test",
-                                   test_file.name)  # pylint: disable=line-too-long
-        test_file_name = test_file.name
-        test_file.close()
-        print("Test data is downloaded to %s" % test_file_name)
-
-    return train_file_name, test_file_name
 
 
 def logloss(act, pred):
@@ -111,16 +74,15 @@ class Network(object):
 
             h_drop = tf.nn.dropout(h_fc2, self.keep_prob)
 
-            W_fc3 = weight_variable([50, 1])
-            b_fc3 = bias_variable([1])
-            h_fc3 = tf.nn.sigmoid(tf.matmul(h_drop, W_fc3) + b_fc3)
+            W_fc3 = weight_variable([50, 2])
+            b_fc3 = bias_variable([2])
+            h_fc3 = tf.matmul(h_drop, W_fc3) + b_fc3
 
-        self.readout = tf.reshape(h_fc3, [-1])
-        # self.readout = out_wide
-        # self.readout = out_wide + h_fc4
-        self.y = tf.placeholder(tf.float32, [None], name='holder_y')
-        self.loss = tf.losses.log_loss(self.y, self.readout, epsilon=1e-15)
-
+        self.out_p = tf.nn.softmax(h_fc3)
+        self.readout = tf.argmax(h_fc3, 1)
+        self.y = tf.placeholder(tf.int32, [None], name='holder_y')
+        one_hot = tf.one_hot(self.y, 2, on_value=1, off_value=0, dtype=tf.int32)
+        self.loss = tf.losses.softmax_cross_entropy(one_hot, h_fc3)
         return
 
 
@@ -248,8 +210,8 @@ class Trainer(object):
             feed_dict[self.holders_dict[key]] = np.reshape(df_batch[key].values, [-1, 1])
 
         feed_dict.update({
-            # self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
-            self.net.y: df_batch[LABEL_COLUMN].values,
+            self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
+            # self.net.y: df_batch[LABEL_COLUMN].values,
             self.net.keep_prob: keep_prob,
         })
 
@@ -284,13 +246,15 @@ class Trainer(object):
         print 'num_of_batch', num_of_batch
         print '---------------------------------------------------'
 
+        train_acc_list = []
+        test_acc_list = []
         for epoch in range(100):
             df_train = df_train.sample(frac=1)
             for k in range(num_of_batch):
                 df_batch = df_train.iloc[k * BATCH_SIZE: (k + 1) * BATCH_SIZE]
                 train_feed = self.create_feed_dict(df_batch, keep_prob=1.0, phrase=True)
                 self.session.run(self.apply_gradient, feed_dict=train_feed)
-
+                # break
             # if epoch % 1000 == 1:
             #     self.backup()
 
@@ -304,6 +268,7 @@ class Trainer(object):
             )
             # train_log_loss = logloss(df_train_batch[LABEL_COLUMN].values, train_readout)
             train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_readout)
+            train_acc_list.append(train_accuracy)
 
             df_test_batch = df_test.sample(100)
             test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0, phrase=False)
@@ -315,21 +280,23 @@ class Trainer(object):
             )
             # test_log_loss = logloss(df_test_batch[LABEL_COLUMN].values, test_readout)
             test_accuracy = self.check_accuray(df_test_batch[LABEL_COLUMN], test_readout)
+            test_acc_list.append(test_accuracy)
 
             print ('epoch: %d \ train: loss=%0.3f, accuracy=%0.3f,' +
                    'test: loss=%0.3f, accuracy=%0.3f') \
                 % (epoch, train_loss, train_accuracy,
                    test_loss, test_accuracy)
-
             # if epoch == 100:
             #     break
+
+        print 'avg: train=', np.mean(train_acc_list), ' / test=', np.mean(test_acc_list)
         return
 
     def check_accuray(self, label, pred):
         size = np.shape(pred)[0]
         pred = pred.copy()
-        pred[pred >= 0.5] = 1
-        pred[pred < 0.5] = 0
+        # pred[pred >= 0.5] = 1
+        # pred[pred < 0.5] = 0
         correct = np.sum(pred == label)
         return float(correct) / size
 
