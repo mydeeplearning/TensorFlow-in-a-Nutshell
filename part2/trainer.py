@@ -8,6 +8,7 @@ from tensorflow.contrib.layers import sparse_column_with_hash_bucket
 import numpy as np
 import random
 import pandas as pd
+import math
 import os
 from sklearn.model_selection import train_test_split
 import tempfile
@@ -50,13 +51,15 @@ def maybe_download(train_data, test_data):
 
     return train_file_name, test_file_name
 
+
 def logloss(act, pred):
-  epsilon = 1e-15
-  pred = sp.maximum(epsilon, pred)
-  pred = sp.minimum(1-epsilon, pred)
-  ll = sum(act*sp.log(pred) + sp.subtract(1,act)*sp.log(sp.subtract(1,pred)))
-  ll = ll * -1.0/len(act)
-  return ll
+    epsilon = 1e-15
+    pred = sp.maximum(epsilon, pred)
+    pred = sp.minimum(1 - epsilon, pred)
+    ll = sum(act * sp.log(pred) + sp.subtract(1, act) * sp.log(sp.subtract(1, pred)))
+    ll = ll * -1.0 / len(act)
+    return ll
+
 
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.01)
@@ -107,26 +110,17 @@ class Network(object):
             self.keep_prob = tf.placeholder(tf.float32)
             h_drop = tf.nn.dropout(h_fc3, self.keep_prob)
 
-            W_fc4 = weight_variable([128, 2])
-            b_fc4 = bias_variable([2])
-            h_fc4 = tf.matmul(h_drop, W_fc4) + b_fc4
-            # self.readout = tf.matmul(h_drop, W_fc4) + b_fc4
+            W_fc4 = weight_variable([128, 1])
+            b_fc4 = bias_variable([1])
+            h_fc4 = tf.nn.sigmoid(tf.matmul(h_drop, W_fc4) + b_fc4)
 
-            # h_merge = out_wide + h_f4
-            # h_merge = h_fc4_drop
-            # self.out_p = tf.nn.sigmoid(h_fc4_drop)
+            # self.readout = tf.nn.sigmoid(out_wide)
 
-            # self.out_p = tf.nn.sigmoid(out_wide)
-
+        self.readout = tf.reshape(h_fc4, [-1])
         # self.readout = out_wide
-        self.readout = out_wide + h_fc4
-        # loss function
+        # self.readout = out_wide + h_fc4
         self.y = tf.placeholder(tf.int32, [None], name='holder_y')
-        self.y_ = tf.one_hot(self.y, 2, on_value=1, off_value=0, dtype=tf.int32)
-        # self.loss = tf.losses.log_loss(self.y, self.out_p, epsilon=1e-15)
-        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.y_, logits=self.readout))
-        correct_prediction = tf.equal(tf.argmax(self.y_, 1), tf.argmax(self.readout, 1))
-        self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        self.loss = tf.losses.log_loss(self.y, self.readout, epsilon=1e-15)
 
         return
 
@@ -255,8 +249,8 @@ class Trainer(object):
             feed_dict[self.holders_dict[key]] = np.reshape(df_batch[key].values, [-1, 1])
 
         feed_dict.update({
-            # self.net.y: np.reshape(df_batch[LABEL_COLUMN].values, [-1, 1]),
-            self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
+            # self.net.y: df_batch[LABEL_COLUMN].values.astype(np.int32),
+            self.net.y: df_batch[LABEL_COLUMN].values,
             self.net.keep_prob: keep_prob
         })
 
@@ -275,7 +269,6 @@ class Trainer(object):
 
         df_train[LABEL_COLUMN] = (df_train["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
         df_test[LABEL_COLUMN] = (df_test["income_bracket"].apply(lambda x: ">50K" in x)).astype(int)
-
 
         print '---------------------------------------------------'
         print 'pos:', np.sum(df_train[LABEL_COLUMN] == 1)
@@ -308,25 +301,40 @@ class Trainer(object):
             if epoch % 100 == 0:
                 df_train_batch = df_train.sample(100)
                 train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0)
-                train_loss, train_accuracy = self.session.run([self.net.loss, self.net.accuracy], feed_dict=train_feed)
-                # train_loss, train_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=train_feed)
-                # train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_pred)
+                train_loss, train_readout = self.session.run(
+                    [
+                        self.net.loss, self.net.readout
+                    ],
+                    feed_dict=train_feed
+                )
+                train_log_loss = logloss(df_train_batch[LABEL_COLUMN].values, train_readout)
+                train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_readout)
+
+                if math.isnan(train_log_loss):
+                    print train_readout
+                    print np.min(train_readout), np.max(train_readout)
 
                 df_test_batch = df_test.sample(100)
                 test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0)
-                test_loss, test_accuracy = self.session.run([self.net.loss, self.net.accuracy], feed_dict=test_feed)
-                # test_loss, test_pred = self.session.run([self.net.loss, self.net.out_p], feed_dict=test_feed)
-                # test_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN], test_pred)
+                test_loss, test_readout = self.session.run(
+                    [
+                        self.net.loss, self.net.readout
+                    ],
+                    feed_dict=test_feed
+                )
+                test_log_loss = logloss(df_test_batch[LABEL_COLUMN].values, test_readout)
+                test_accuracy = self.check_accuray(df_test_batch[LABEL_COLUMN], test_readout)
 
-                print 'epoch: %d, train_loss: %5f, train_accuracy: %5f, test_loss: %5f, test_accuracy: %5f' \
-                    % (epoch, train_loss, train_accuracy, test_loss, test_accuracy)
+                print ('epoch: %d \ train: loss=%3f, log_loss=%3f, accuracy=%3f,' +
+                       'test: loss=%3f, log_loss=%3f, accuracy=%3f') \
+                    % (epoch, train_loss, train_log_loss, train_accuracy,
+                       test_loss, test_log_loss, test_accuracy)
 
             # if epoch == 100:
             #     break
         return
 
     def check_accuray(self, label, pred):
-        pred = np.reshape(pred, [-1])
         size = np.shape(pred)[0]
         pred[pred >= 0.5] = 1
         pred[pred < 0.5] = 0
