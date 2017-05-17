@@ -112,14 +112,16 @@ class Network(object):
 
             W_fc4 = weight_variable([128, 1])
             b_fc4 = bias_variable([1])
-            h_fc4 = tf.nn.sigmoid(tf.matmul(h_drop, W_fc4) + b_fc4)
+            # h_fc4 = tf.nn.sigmoid(tf.matmul(h_drop, W_fc4) + b_fc4)
+            h_fc4 = tf.matmul(h_drop, W_fc4) + b_fc4
 
             # self.readout = tf.nn.sigmoid(out_wide)
 
+        self.h_fc3 = h_fc3
         self.readout = tf.reshape(h_fc4, [-1])
         # self.readout = out_wide
         # self.readout = out_wide + h_fc4
-        self.y = tf.placeholder(tf.int32, [None], name='holder_y')
+        self.y = tf.placeholder(tf.float32, [None], name='holder_y')
         self.loss = tf.losses.log_loss(self.y, self.readout, epsilon=1e-15)
 
         return
@@ -292,7 +294,7 @@ class Trainer(object):
             self.global_t += 1
             epoch = self.global_t
             df_batch = df_train.sample(BATCH_SIZE)
-            train_feed = self.create_feed_dict(df_batch, keep_prob=0.7)
+            train_feed = self.create_feed_dict(df_batch, keep_prob=1.0)
             self.session.run(self.apply_gradient, feed_dict=train_feed)
 
             if epoch % 1000 == 0:
@@ -301,19 +303,23 @@ class Trainer(object):
             if epoch % 100 == 0:
                 df_train_batch = df_train.sample(100)
                 train_feed = self.create_feed_dict(df_train_batch, keep_prob=1.0)
-                train_loss, train_readout = self.session.run(
+                train_loss, train_readout, h_fc3 = self.session.run(
                     [
-                        self.net.loss, self.net.readout
+                        self.net.loss, self.net.readout, self.net.h_fc3
                     ],
                     feed_dict=train_feed
                 )
                 train_log_loss = logloss(df_train_batch[LABEL_COLUMN].values, train_readout)
                 train_accuracy = self.check_accuray(df_train_batch[LABEL_COLUMN].values, train_readout)
 
-                if math.isnan(train_log_loss):
-                    print train_readout
-                    print np.min(train_readout), np.max(train_readout)
+                print '=' * 30
+                print h_fc3
+                print train_readout
+                # if math.isnan(train_log_loss) or 1 == 1:
+                #     print train_readout
+                #     print np.min(train_readout), np.max(train_readout)
 
+                print '=' * 30
                 df_test_batch = df_test.sample(100)
                 test_feed = self.create_feed_dict(df_test_batch, keep_prob=1.0)
                 test_loss, test_readout = self.session.run(
@@ -325,8 +331,8 @@ class Trainer(object):
                 test_log_loss = logloss(df_test_batch[LABEL_COLUMN].values, test_readout)
                 test_accuracy = self.check_accuray(df_test_batch[LABEL_COLUMN], test_readout)
 
-                print ('epoch: %d \ train: loss=%3f, log_loss=%3f, accuracy=%3f,' +
-                       'test: loss=%3f, log_loss=%3f, accuracy=%3f') \
+                print ('epoch: %d \ train: loss=%0.3f, log_loss=%0.3f, accuracy=%0.3f,' +
+                       'test: loss=%0.3f, log_loss=%0.3f, accuracy=%0.3f') \
                     % (epoch, train_loss, train_log_loss, train_accuracy,
                        test_loss, test_log_loss, test_accuracy)
 
